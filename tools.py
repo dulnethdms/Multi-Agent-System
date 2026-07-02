@@ -1,49 +1,36 @@
-import os
-from typing import Any
-
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    def load_dotenv() -> None:
-        return None
-
+from langchain.tools import tool 
+import requests
+from bs4 import BeautifulSoup
+from tavily import TavilyClient
+import os 
+from dotenv import load_dotenv
+from rich import print
 load_dotenv()
 
-try:
-    from langchain_core.tools import tool
-except ImportError:
-    def tool(*args: Any, **kwargs: Any):
-        def decorator(func):
-            return func
-        return decorator
-
-try:
-    from tavily import TavilyClient
-except ImportError:
-    TavilyClient = None
-
-
-def _get_tavily_client():
-    api_key = os.getenv("TAVILY_API_KEY") or os.getenv("TAVILIY_API_KEY")
-    if not api_key:
-        raise RuntimeError("TAVILY_API_KEY is not set. Add it to your environment or .env file.")
-    if TavilyClient is None:
-        raise RuntimeError("The 'tavily' package is not installed. Install dependencies first.")
-    return TavilyClient(api_key=api_key)
-
+tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 @tool
-def web_search(query: str) -> str:
-    """Search the web for recent and reliable information on a topic. Return titles, URLs, and snippets."""
+def web_search(query : str) -> str:
+    """Search the web for recent and reliable information on a topic . Returns Titles , URLs and snippets."""
+    results = tavily.search(query=query,max_results=5)
+
+    out = []
+
+    for r in results['results']:
+        out.append(
+            f"Title: {r['title']}\nURL: {r['url']}\nSnippet: {r['content'][:300]}\n"
+        )
+    
+    return "\n----\n".join(out)
+
+@tool
+def scrape_url(url: str) -> str:
+    """Scrape and return clean text content from a given URL for deeper reading."""
     try:
-        tavily = _get_tavily_client()
-        results = tavily.search(query=query, max_results=5)
-        return str(results)
-    except Exception as exc:
-        return f"Search failed: {exc}"
-
-
-if __name__ == "__main__":
-    result = web_search.invoke("what are the recent news of war?") if hasattr(web_search, "invoke") else web_search("what are the recent news of war?")
-    print(result)
-        
+        resp = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer"]):
+            tag.decompose()
+        return soup.get_text(separator=" ", strip=True)[:3000]
+    except Exception as e:
+        return f"Could not scrape URL: {str(e)}"
